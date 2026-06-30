@@ -1,0 +1,25 @@
+{
+  "name": "wordle-arcade",
+  "description": "An arcade-twist Wordle: classic letter game with infinite, time-pressured levels and a Redis leaderboard.",
+  "license": "MIT",
+  "author": "Crescenzo Sorrentino",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.38.0",
+    "nuxt": "^4.4.8",
+    "vue": "^3.5.35",
+    "vue-router": "^5.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vue-tsc": "^3.3.5"
+  }
+}
