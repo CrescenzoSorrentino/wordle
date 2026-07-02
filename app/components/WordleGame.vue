@@ -10,6 +10,8 @@ import {
   isValidWord,
   pickRandomAnswer,
   timeForLevel,
+  TIME_BONUS_CORRECT,
+  TIME_BONUS_PRESENT,
   type LetterState,
 } from "#shared/wordle";
 import {
@@ -50,6 +52,11 @@ const scoreSubmitted = ref(false); // already saved this run's score?
 
 let messageTimer: ReturnType<typeof setTimeout> | undefined;
 let countdownTimer: ReturnType<typeof setInterval> | undefined;
+
+// Which discoveries were already rewarded with time, so the same green/yellow
+// can't be farmed by re-submitting it. Reset for every new word.
+let rewardedGreens = new Set<number>(); // green positions already rewarded
+let rewardedYellows = new Set<string>(); // present letters already rewarded
 
 // === Derived data ===
 
@@ -238,6 +245,23 @@ function submitGuess() {
   evaluations.value.push(states);
   currentGuess.value = "";
 
+  // Reward time only for NEW discoveries, so a letter can't be farmed.
+  let bonus = 0;
+  for (let i = 0; i < states.length; i++) {
+    const letter = guess[i]!;
+    if (states[i] === "correct" && !rewardedGreens.has(i)) {
+      rewardedGreens.add(i);
+      bonus += TIME_BONUS_CORRECT;
+    } else if (states[i] === "present" && !rewardedYellows.has(letter)) {
+      rewardedYellows.add(letter);
+      bonus += TIME_BONUS_PRESENT;
+    }
+  }
+  if (bonus > 0) {
+    timeLeft.value += bonus;
+    flashMessage(`+${bonus} seconds!`);
+  }
+
   // Solved: bank the points (before nextLevel resets the board) and level up.
   // Out of attempts: the run is over.
   if (guess === answer.value) {
@@ -255,6 +279,8 @@ function loadWord() {
   evaluations.value = [];
   currentGuess.value = "";
   status.value = "playing";
+  rewardedGreens = new Set(); // new word → nothing rewarded yet
+  rewardedYellows = new Set();
   startTimer(); // fresh, shorter time budget for this level
 }
 

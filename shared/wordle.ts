@@ -17,6 +17,10 @@ export const START_TIME = 300; // seconds at level 1
 export const FLOOR_TIME = 20; // never go below this many seconds
 export const DECAY_RATE = 0.92; // per-level shrink factor (smaller = harsher)
 
+// Time rewarded per letter of a submitted guess, to keep good guesses alive.
+export const TIME_BONUS_CORRECT = 10; // seconds per green letter
+export const TIME_BONUS_PRESENT = 5; // seconds per yellow letter
+
 /**
  * The result for a single letter of a guess:
  * - "correct": right letter, right position (green)
