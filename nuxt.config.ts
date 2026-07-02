@@ -3,6 +3,21 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
 
+  // Page title, description and language for the browser tab and link previews.
+  app: {
+    head: {
+      title: 'Wordle Arcade',
+      htmlAttrs: { lang: 'en' },
+      meta: [
+        {
+          name: 'description',
+          content:
+            'An arcade twist on Wordle: endless, time-pressured word levels with a global leaderboard.',
+        },
+      ],
+    },
+  },
+
   // Server-only configuration for the leaderboard. The empty strings are
   // placeholders: Nuxt overrides each key from the matching NUXT_<KEY>
   // environment variable (see .env.example). Because these are NOT under

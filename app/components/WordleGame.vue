@@ -1,7 +1,10 @@
 <script setup lang="ts">
 /**
- * WordleGame — classic Wordle (step 1). UI + local game state only; the rules
- * live in #shared/wordle. We are building this file up block by block.
+ * WordleGame — the whole game: the board, both keyboards, the level/score/timer
+ * HUD, the per-level countdown, and the end-of-run leaderboard flow. This file
+ * holds the UI and the reactive game state; the pure rules (evaluation,
+ * validation, timer formula) live in #shared/wordle, and the leaderboard rules
+ * in #shared/leaderboard.
  */
 import {
   MAX_ATTEMPTS,
