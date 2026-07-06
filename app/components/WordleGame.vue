@@ -16,6 +16,7 @@ import {
   MAX_TIME,
   TIME_BONUS_CORRECT,
   TIME_BONUS_PRESENT,
+  TIME_PENALTY,
   type LetterState,
 } from "#shared/wordle";
 import {
@@ -91,6 +92,9 @@ const keyStates = computed<Record<string, LetterState>>(() => {
 
   return map;
 });
+
+/** The player's cleaned nickname, used to highlight their row in the board. */
+const myNick = computed(() => sanitizeNickname(nick.value));
 
 /** timeLeft (e.g. 187) formatted as minutes:seconds (e.g. "3:07"). */
 const timeDisplay = computed(() => {
@@ -268,14 +272,17 @@ function submitGuess() {
   if (bonus > 0) {
     timeLeft.value += bonus;
     flashMessage(`+${bonus} seconds!`);
+  } else if (guess !== answer.value) {
+    timeLeft.value = Math.max(0, timeLeft.value - TIME_PENALTY);
+    flashMessage(`-${TIME_PENALTY} seconds!`);
   }
 
   // Solved: bank the points (before nextLevel resets the board) and level up.
-  // Out of attempts: the run is over.
+  // Out of attempts, or a penalty ran the clock out: the run is over.
   if (guess === answer.value) {
     score.value += wordScore();
     nextLevel();
-  } else if (guesses.value.length >= MAX_ATTEMPTS) {
+  } else if (guesses.value.length >= MAX_ATTEMPTS || timeLeft.value <= 0) {
     endRun();
   }
 }
@@ -344,6 +351,11 @@ function onPhysicalKey(event: KeyboardEvent) {
   }
 }
 
+// Lock the page scroll behind the Game Over popup, restore it otherwise.
+watch(status, (current) => {
+  document.body.style.overflow = current === "lost" ? "hidden" : "";
+});
+
 // Start the first game and begin listening to the keyboard when the component
 // appears on screen; stop listening when it goes away (tidy-up).
 onMounted(() => {
@@ -354,17 +366,30 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onPhysicalKey);
   stopTimer();
+  document.body.style.overflow = ""; // never leave the page locked
 });
 </script>
 
 <template>
   <section class="wordle" aria-label="Wordle game">
     <div class="wordle__hud">
-      <span class="wordle__hud-item">Level {{ level }}</span>
-      <span class="wordle__hud-item wordle__hud-item--time">{{
-        timeDisplay
-      }}</span>
-      <span class="wordle__hud-item">Score {{ score }}</span>
+      <div class="wordle__stat">
+        <span class="wordle__stat-label">Level</span>
+        <span class="wordle__stat-value">{{ level }}</span>
+      </div>
+      <div
+        class="wordle__stat wordle__stat--time"
+        :class="{
+          'wordle__stat--urgent': status === 'playing' && timeLeft <= 15,
+        }"
+      >
+        <span class="wordle__stat-label">Time</span>
+        <span class="wordle__stat-value">{{ timeDisplay }}</span>
+      </div>
+      <div class="wordle__stat">
+        <span class="wordle__stat-label">Score</span>
+        <span class="wordle__stat-value">{{ score }}</span>
+      </div>
     </div>
 
     <!-- Short-lived feedback. aria-live lets screen readers announce it. -->
@@ -387,13 +412,14 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Game Over screen: only rendered once the run has ended. -->
-    <div
-      v-if="status === 'lost'"
-      class="wordle__result"
-      role="status"
-      aria-live="polite"
-    >
+    <!-- Game Over: a modal popup once the run has ended. -->
+    <div v-if="status === 'lost'" class="wordle__overlay">
+      <div
+        class="wordle__result"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Game over"
+      >
       <p class="wordle__result-title">Game Over</p>
       <p class="wordle__result-text">
         The word was <strong>{{ answer.toUpperCase() }}</strong
@@ -429,6 +455,12 @@ onBeforeUnmount(() => {
           v-for="(entry, i) in leaderboard"
           :key="i"
           class="wordle__scores-row"
+          :class="{
+            'wordle__scores-row--me':
+              scoreSubmitted &&
+              entry.nick === myNick &&
+              entry.score === score,
+          }"
         >
           <span class="wordle__scores-rank">{{ i + 1 }}</span>
           <span class="wordle__scores-nick">{{ entry.nick }}</span>
@@ -436,9 +468,10 @@ onBeforeUnmount(() => {
         </li>
       </ol>
 
-      <button class="wordle__again" type="button" @click="newRun">
-        Play again
-      </button>
+        <button class="wordle__again" type="button" @click="newRun">
+          Play again
+        </button>
+      </div>
     </div>
 
     <!-- On-screen keyboard: the only way to type on a touch device. -->
@@ -502,24 +535,60 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
-/* === HUD (level / score bar) === */
+/* === HUD (level / time / score tiles) === */
 .wordle__hud {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
   width: 100%;
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
 }
 
-.wordle__hud-item {
+.wordle__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.55rem 0.4rem;
+  border: 1px solid var(--wg-border);
+  border-radius: 10px;
+  background: #fafafa;
+}
+
+.wordle__stat-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: var(--wg-absent);
 }
 
-.wordle__hud-item--time {
-  /* tabular-nums keeps the digits from shifting width as they count down */
+.wordle__stat-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
-  font-size: 1.15rem;
+}
+
+/* The time tile is the focal point and flips to a warning look when low. */
+.wordle__stat--time {
+  border-color: var(--wg-border-filled);
+}
+
+.wordle__stat--urgent {
+  border-color: #d33;
+  background: #fdecec;
+  animation: wordle-pulse 1s ease-in-out infinite;
+}
+
+.wordle__stat--urgent .wordle__stat-label,
+.wordle__stat--urgent .wordle__stat-value {
+  color: #d33;
+}
+
+@keyframes wordle-pulse {
+  50% {
+    transform: scale(1.05);
+  }
 }
 
 /* === Board === */
@@ -577,25 +646,67 @@ onBeforeUnmount(() => {
 }
 
 /* === Result banner === */
+/* Dimmed full-screen backdrop that centres the Game Over card. */
+.wordle__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.55);
+  animation: wordle-fade 0.2s ease;
+}
+
 .wordle__result {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.9rem;
+  width: 100%;
+  max-width: 24rem;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 1.5rem 1.25rem;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
   text-align: center;
+  animation: wordle-pop 0.2s ease;
+}
+
+@keyframes wordle-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes wordle-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
 }
 
 .wordle__result-title {
   margin: 0;
-  font-size: 1.6rem;
+  font-size: 1.9rem;
   font-weight: 800;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .wordle__result-text {
   margin: 0;
   font-size: 1.05rem;
+  color: var(--wg-absent);
+}
+
+.wordle__result-text strong {
+  color: var(--wg-text);
+  letter-spacing: 0.05em;
 }
 
 .wordle__result-stats {
@@ -604,9 +715,11 @@ onBeforeUnmount(() => {
 }
 
 .wordle__again {
+  width: 100%;
+  box-sizing: border-box;
   font: inherit;
   font-weight: 600;
-  padding: 0.6rem 1.4rem;
+  padding: 0.7rem 1.4rem;
   border: none;
   border-radius: var(--wg-radius);
   background: var(--wg-correct);
@@ -633,13 +746,13 @@ onBeforeUnmount(() => {
 }
 
 .wordle__nickname-input {
+  width: 100%;
+  box-sizing: border-box;
   font: inherit;
   text-align: center;
-  padding: 0.5rem 0.7rem;
+  padding: 0.6rem 0.7rem;
   border: 2px solid var(--wg-border-filled);
   border-radius: var(--wg-radius);
-  width: 12rem;
-  max-width: 100%;
 }
 
 .wordle__nickname-input:focus {
@@ -662,16 +775,40 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.35rem 0.6rem;
+  padding: 0.45rem 0.7rem;
   background: #f4f4f5;
-  border-radius: var(--wg-radius);
+  border-radius: 8px;
   font-size: 0.95rem;
 }
 
+/* The player's own freshly-saved row stands out. */
+.wordle__scores-row--me {
+  background: #e7f3e6;
+  box-shadow: inset 0 0 0 2px var(--wg-correct);
+}
+
 .wordle__scores-rank {
-  min-width: 1.5rem;
-  font-weight: 700;
-  color: var(--wg-absent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #ffffff;
+  background: var(--wg-absent);
+}
+
+/* Gold / silver / bronze badges for the top three. */
+.wordle__scores-row:nth-child(1) .wordle__scores-rank {
+  background: #d4af37;
+}
+.wordle__scores-row:nth-child(2) .wordle__scores-rank {
+  background: #9aa0a6;
+}
+.wordle__scores-row:nth-child(3) .wordle__scores-rank {
+  background: #b08d57;
 }
 
 .wordle__scores-nick {

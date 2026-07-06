@@ -14,7 +14,7 @@ export const MAX_ATTEMPTS = 6;
 
 /** Timer settings for the arcade levels (see timeForLevel). */
 export const START_TIME = 300; // seconds at level 1
-export const FLOOR_TIME = 20; // never go below this many seconds
+export const FLOOR_TIME = 30; // never go below this many seconds
 export const DECAY_RATE = 0.92; // per-level shrink factor (smaller = harsher)
 
 // Cap on carried-over time. Same as the start time for now, but named on its
@@ -22,8 +22,11 @@ export const DECAY_RATE = 0.92; // per-level shrink factor (smaller = harsher)
 export const MAX_TIME = START_TIME;
 
 // Time rewarded per letter of a submitted guess, to keep good guesses alive.
-export const TIME_BONUS_CORRECT = 15; // seconds per green letter
+export const TIME_BONUS_CORRECT = 10; // seconds per green letter
 export const TIME_BONUS_PRESENT = 5; // seconds per yellow letter
+
+// Time lost for a guess that reveals nothing new (a wasted attempt).
+export const TIME_PENALTY = 5; // seconds
 
 /**
  * The result for a single letter of a guess:
