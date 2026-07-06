@@ -13,6 +13,7 @@ import {
   isValidWord,
   pickRandomAnswer,
   timeForLevel,
+  MAX_TIME,
   TIME_BONUS_CORRECT,
   TIME_BONUS_PRESENT,
   type LetterState,
@@ -213,12 +214,16 @@ async function submitScore() {
 }
 
 /**
- * Resets the clock to this level's time budget and starts ticking down once a
- * second. When it reaches zero the run is over.
+ * Adds this level's time budget to whatever time is left (carry-over, so fast
+ * solves bank spare seconds), capped at MAX_TIME, then starts ticking down once
+ * a second. When it reaches zero the run is over.
  */
 function startTimer() {
   stopTimer(); // never let two countdowns run at once
-  timeLeft.value = timeForLevel(level.value);
+  timeLeft.value = Math.min(
+    timeLeft.value + timeForLevel(level.value),
+    MAX_TIME,
+  );
   countdownTimer = setInterval(() => {
     timeLeft.value--;
     if (timeLeft.value <= 0) {
@@ -291,6 +296,7 @@ function loadWord() {
 function newRun() {
   level.value = 1;
   score.value = 0;
+  timeLeft.value = 0;
   qualifies.value = false;
   scoreSubmitted.value = false;
   nick.value = "";
