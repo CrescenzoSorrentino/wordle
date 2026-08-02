@@ -1,8 +1,9 @@
 /**
- * Words that can be chosen as the SOLUTION (official Wordle answers list,
- * 2,315 common five-letter words). A subset of VALID_WORDS.
- * Source: https://gist.github.com/cfreshman (wordle-answers-alphabetical).
- * Generated data file — do not edit by hand.
+ * Parole che possono essere scelte come SOLUZIONE (lista ufficiale delle
+ * risposte di Wordle: 2.315 parole comuni di cinque lettere). È un
+ * sottoinsieme di VALID_WORDS.
+ * Fonte: https://gist.github.com/cfreshman (wordle-answers-alphabetical).
+ * File di dati generato — non modificare a mano.
  */
 export const ANSWER_WORDS: readonly string[] = [
   "aback","abase","abate","abbey","abbot","abhor","abide","abled","abode","abort",

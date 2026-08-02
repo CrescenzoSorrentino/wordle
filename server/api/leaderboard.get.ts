@@ -1,17 +1,17 @@
 import { Redis } from "@upstash/redis";
 import { LEADERBOARD_SIZE, type LeaderboardEntry } from "#shared/leaderboard";
 
-// The Redis key under which the sorted set lives. Members are stored as
-// "nick|id" so two players with the same nickname stay distinct.
+// La chiave Redis sotto cui vive l'insieme ordinato. Ogni membro è salvato come
+// "nick|id", così due giocatori con lo stesso nome restano righe distinte.
 const LEADERBOARD_KEY = "wordle:leaderboard";
 
 /**
  * GET /api/leaderboard
  *
- * Returns the top scores, highest first. Reads them from the Redis sorted set
- * with ZRANGE (rev = highest first, withScores = include each score). If Redis
- * is unreachable we fail soft and return an empty list, so the game UI still
- * works without a leaderboard.
+ * Restituisce i punteggi migliori, dal più alto. Li legge dall'insieme ordinato
+ * di Redis con ZRANGE (rev = dal più alto, withScores = includi il punteggio).
+ * Se Redis non risponde non solleva un errore: restituisce una lista vuota, così
+ * il gioco continua a funzionare anche senza classifica.
  */
 export default defineEventHandler(async (event): Promise<LeaderboardEntry[]> => {
   const config = useRuntimeConfig(event);
@@ -22,7 +22,7 @@ export default defineEventHandler(async (event): Promise<LeaderboardEntry[]> => 
       token: config.upstashRedisRestToken,
     });
 
-    // Flat array: [member, score, member, score, ...].
+    // Redis risponde con un array piatto: [membro, punteggio, membro, ...].
     const raw = await redis.zrange<(string | number)[]>(
       LEADERBOARD_KEY,
       0,
@@ -30,7 +30,7 @@ export default defineEventHandler(async (event): Promise<LeaderboardEntry[]> => 
       { rev: true, withScores: true },
     );
 
-    // Walk the flat array two at a time, turning each pair into an entry.
+    // Lo si percorre a due a due, trasformando ogni coppia in una riga.
     const entries: LeaderboardEntry[] = [];
     for (let i = 0; i < raw.length; i += 2) {
       const member = String(raw[i]);

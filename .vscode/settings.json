@@ -1,0 +1,6 @@
+{
+  // I commenti del progetto sono in italiano: il correttore ortografico
+  // segnalerebbe ogni parola come sconosciuta. Disattivato qui, solo per
+  // questo progetto — le tue impostazioni globali restano intatte.
+  "cSpell.enabled": false
+}

@@ -1,59 +1,64 @@
 /**
- * Core Wordle rules and game logic (no UI, no Vue, no DOM).
- * Single source of truth for HOW the game works, imported via the
- * `#shared` alias:  import { ... } from '#shared/wordle'
+ * Regole e logica di gioco di Wordle (niente interfaccia, niente Vue, niente
+ * DOM). Unica fonte di verità su COME funziona il gioco, importata con l'alias
+ * `#shared`:  import { ... } from '#shared/wordle'
  */
 import { VALID_WORDS } from "#shared/words/valid-words";
 import { ANSWER_WORDS } from "#shared/words/answer-words";
 
-/** Number of letters in a word (classic Wordle: 5). */
+/** Numero di lettere di una parola (Wordle classico: 5). */
 export const WORD_LENGTH = 5;
 
-/** Number of guesses the player gets per word (classic Wordle: 6). */
+/** Tentativi a disposizione per ogni parola (Wordle classico: 6). */
 export const MAX_ATTEMPTS = 6;
 
-/** Timer settings for the arcade levels (see timeForLevel). */
-export const START_TIME = 300; // seconds at level 1
-export const FLOOR_TIME = 30; // never go below this many seconds
-export const DECAY_RATE = 0.92; // per-level shrink factor (smaller = harsher)
+/** Impostazioni del timer per i livelli arcade (vedi timeForLevel). */
+export const START_TIME = 300; // secondi al livello 1
+export const FLOOR_TIME = 30; // non si scende mai sotto questi secondi
+export const DECAY_RATE = 0.92; // quanto si accorcia per livello (più basso = più duro)
 
-// Cap on carried-over time. Same as the start time for now, but named on its
-// own so the two can diverge later without touching the rest of the code.
+// Tetto massimo al tempo riportato da un livello all'altro. Per ora coincide
+// col tempo iniziale, ma ha un nome suo così i due valori potranno divergere
+// senza toccare il resto del codice.
 export const MAX_TIME = START_TIME;
 
-// Time rewarded per letter of a submitted guess, to keep good guesses alive.
-export const TIME_BONUS_CORRECT = 10; // seconds per green letter
-export const TIME_BONUS_PRESENT = 5; // seconds per yellow letter
+// Tempo regalato per ogni lettera di un tentativo, per premiare chi indovina.
+export const TIME_BONUS_CORRECT = 10; // secondi per lettera verde
+export const TIME_BONUS_PRESENT = 5; // secondi per lettera gialla
 
-// Time lost for a guess that reveals nothing new (a wasted attempt).
-export const TIME_PENALTY = 5; // seconds
+// Tempo perso per un tentativo che non rivela nulla di nuovo (sprecato).
+export const TIME_PENALTY = 5; // secondi
+
+export const EXPLANATION_TIME = 12; // secondi per leggere la spiegazione di una parola
 
 /**
- * The result for a single letter of a guess:
- * - "correct": right letter, right position (green)
- * - "present": letter is in the word but in another position (yellow)
- * - "absent":  letter is not in the word (grey)
+ * L'esito di una singola lettera di un tentativo:
+ * - "correct": lettera giusta al posto giusto (verde)
+ * - "present": la lettera c'è, ma in un'altra posizione (giallo)
+ * - "absent":  la lettera non è nella parola (grigio)
  */
 export type LetterState = "correct" | "present" | "absent";
 
 /**
- * Lookup set for guess validation. Built once from the array so "is this a real
- * word?" is instant, instead of scanning ~15k words on every guess.
+ * Insieme di ricerca per validare i tentativi. Costruito una volta sola
+ * dall'array, così la domanda "è una parola vera?" ha risposta immediata invece
+ * di scorrere ~15.000 parole a ogni tentativo.
  */
 const VALID_WORD_SET = new Set(VALID_WORDS);
 
 /**
- * Returns true if `word` is accepted as a guess (exists in the allowed list).
- * Trimmed and lower-cased first so casing never causes a false reject.
+ * Restituisce true se `word` è accettata come tentativo (cioè è nella lista
+ * ammessa). Prima toglie gli spazi ai lati e porta tutto in minuscolo, così le
+ * maiuscole non provocano mai un rifiuto sbagliato.
  */
 export function isValidWord(word: string): boolean {
   return VALID_WORD_SET.has(word.trim().toLowerCase());
 }
 
 /**
- * Picks a random solution from the answer list. Math.random is fine here: the
- * choice just needs to be unpredictable to the player, not cryptographically
- * secure.
+ * Sceglie una soluzione a caso dalla lista delle risposte. Math.random va
+ * benissimo qui: la scelta deve solo essere imprevedibile per il giocatore, non
+ * sicura dal punto di vista crittografico.
  */
 export function pickRandomAnswer(): string {
   const index = Math.floor(Math.random() * ANSWER_WORDS.length);
@@ -61,28 +66,31 @@ export function pickRandomAnswer(): string {
 }
 
 /**
- * Compares a guess against the answer and returns one LetterState per letter.
+ * Confronta un tentativo con la soluzione e restituisce un LetterState per ogni
+ * lettera.
  *
- * Duplicate letters are handled in two passes so a letter is never highlighted
- * more times than it actually occurs:
- *   Pass 1 (greens): mark exact-position matches and spend them from a tally
- *                    of the answer's remaining letters.
- *   Pass 2 (yellows): mark a not-yet-green letter "present" only if the tally
- *                     still has one to spend; otherwise it stays "absent".
+ * Le lettere ripetute sono gestite in due passaggi, così una lettera non viene
+ * mai evidenziata più volte di quante compaia davvero:
+ *   Passaggio 1 (verdi): segna le corrispondenze esatte di posizione e le
+ *                        scala da un conteggio delle lettere della soluzione.
+ *   Passaggio 2 (gialli): segna "present" una lettera non ancora verde solo se
+ *                         il conteggio ne ha ancora una da spendere; altrimenti
+ *                         resta "absent".
  *
- * Both inputs are assumed same-length and lower-cased (call isValidWord first).
+ * Si dà per scontato che i due ingressi siano lunghi uguali e in minuscolo
+ * (chiamare prima isValidWord).
  */
 export function evaluateGuess(guess: string, answer: string): LetterState[] {
   const result: LetterState[] = new Array(guess.length).fill("absent");
 
-  // How many of each letter are still available to match (answer's letters
-  // minus the ones already claimed by a green).
+  // Quante copie di ogni lettera sono ancora disponibili (le lettere della
+  // soluzione meno quelle già prese da un verde).
   const remaining: Record<string, number> = {};
   for (const letter of answer) {
     remaining[letter] = (remaining[letter] ?? 0) + 1;
   }
 
-  // Pass 1: greens.
+  // Passaggio 1: i verdi.
   for (let i = 0; i < guess.length; i++) {
     if (guess[i] === answer[i]) {
       result[i] = "correct";
@@ -90,7 +98,7 @@ export function evaluateGuess(guess: string, answer: string): LetterState[] {
     }
   }
 
-  // Pass 2: yellows / greys.
+  // Passaggio 2: gialli e grigi.
   for (let i = 0; i < guess.length; i++) {
     if (result[i] === "correct") {
       continue;
@@ -106,8 +114,9 @@ export function evaluateGuess(guess: string, answer: string): LetterState[] {
 }
 
 /**
- * Seconds available at a given level. Decays exponentially toward FLOOR_TIME:
- * time = floor + (start - floor) * rate^(level - 1)
+ * Secondi disponibili a un dato livello. Calano in modo esponenziale verso
+ * FLOOR_TIME, senza mai raggiungerlo:
+ * tempo = pavimento + (partenza - pavimento) * fattore^(livello - 1)
  */
 export function timeForLevel(level: number): number {
   return Math.floor(

@@ -5,27 +5,28 @@ import {
   sanitizeNickname,
 } from "#shared/leaderboard";
 
-// Same key as the GET endpoint. Members are stored as "nick|id".
+// Stessa chiave usata dalla GET. Ogni membro è salvato come "nick|id".
 const LEADERBOARD_KEY = "wordle:leaderboard";
 
 /**
  * POST /api/leaderboard   body: { nick: string, score: number }
  *
- * Validates the submission and adds it to the sorted set with ZADD. The client
- * already checks these, but client checks are not a security guarantee, so we
- * re-check here. The member is "nick|id" with a random id, so two players with
- * the same nickname remain distinct entries.
+ * Valida l'invio e lo aggiunge all'insieme ordinato con ZADD. Il client fa già
+ * questi controlli, ma un controllo lato client non è una garanzia di sicurezza
+ * (chiunque può chiamare l'API a mano), quindi qui si ricontrolla tutto. Il
+ * membro è "nick|id" con un id casuale, così due giocatori con lo stesso nome
+ * restano righe distinte.
  */
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
 
-  // Score must be a whole, non-negative, sane number.
+  // Il punteggio dev'essere un numero intero, non negativo e plausibile.
   const score = Number(body?.score);
   if (!Number.isInteger(score) || score < 0 || score > 1_000_000) {
     throw createError({ statusCode: 400, statusMessage: "Invalid score" });
   }
 
-  // Nickname must survive sanitising with at least one character left.
+  // Il nome deve sopravvivere alla pulizia con almeno un carattere.
   if (typeof body?.nick !== "string" || !isValidNickname(body.nick)) {
     throw createError({ statusCode: 400, statusMessage: "Invalid nickname" });
   }
@@ -37,12 +38,13 @@ export default defineEventHandler(async (event) => {
     token: config.upstashRedisRestToken,
   });
 
-  // "|" cannot appear in a sanitised nick, so it is a safe separator.
+  // "|" non può comparire in un nome ripulito, quindi è un separatore sicuro.
   const member = `${nick}|${crypto.randomUUID()}`;
   await redis.zadd(LEADERBOARD_KEY, { score, member });
 
-  // Keep the set small: drop everything below the top LEADERBOARD_SIZE.
-  // Ranks go low-to-high, so this removes the lowest-scoring extras.
+  // Tiene l'insieme piccolo: butta via tutto ciò che sta sotto i primi
+  // LEADERBOARD_SIZE. Le posizioni vanno dal punteggio più basso al più alto,
+  // quindi questa riga elimina proprio gli eccedenti peggiori.
   await redis.zremrangebyrank(LEADERBOARD_KEY, 0, -(LEADERBOARD_SIZE + 1));
 
   return { ok: true };

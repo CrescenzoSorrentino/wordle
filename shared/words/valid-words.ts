@@ -1,8 +1,9 @@
 /**
- * Full set of words accepted as a GUESS (official Wordle allowed-guesses list,
- * 14,855 five-letter words). A guess is only valid if it appears here.
- * Source: https://github.com/tabatkins/wordle-list (includes every answer).
- * Generated data file — do not edit by hand.
+ * Insieme completo delle parole accettate come TENTATIVO (lista ufficiale dei
+ * tentativi ammessi di Wordle: 14.855 parole di cinque lettere). Un tentativo
+ * è valido solo se compare qui.
+ * Fonte: https://github.com/tabatkins/wordle-list (contiene tutte le soluzioni).
+ * File di dati generato — non modificare a mano.
  */
 export const VALID_WORDS: readonly string[] = [
   "aahed","aalii","aapas","aargh","aarti","abaca","abaci","aback","abacs","abaft",
