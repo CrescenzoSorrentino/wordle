@@ -27,7 +27,11 @@ import {
   sanitizeNickname,
   type LeaderboardEntry,
 } from "#shared/leaderboard";
-import { getDefinition } from "#shared/definitions";
+// Solo il TIPO, non i dati. Un `import type` sparisce quando il codice viene
+// tradotto in JavaScript: serve a TypeScript per i controlli e non trascina
+// nel browser un solo byte del dizionario. Importare `getDefinition` come
+// facevamo prima ci riporterebbe dentro tutte le 2.315 voci.
+import type { WordDefinition } from "#shared/words/definitions";
 
 // Le tre fasi del gioco: si sta giocando, si sta leggendo la spiegazione della
 // parola, oppure la partita è finita. Tutto il resto del codice si regola su
@@ -173,13 +177,29 @@ const board = computed(() => {
 });
 
 /**
- * La voce di dizionario della parola in corso, pronta da stampare.
- * È una computed e non un ref perché è interamente ricavabile da
- * `answer`: cambia la parola, cambia da sola. Un ref andrebbe aggiornato a mano
- * dentro loadWord(), e il giorno che ce ne dimentichiamo il gioco mostrerebbe
- * la spiegazione della parola precedente, senza che nessuno se ne accorga.
+ * Voce vuota, usata finché quella vera non è arrivata dal server. Il template
+ * salta le righe vuote, quindi nel caso pessimo si vede una finestra sobria
+ * invece di un errore.
  */
-const currentDefinition = computed(() => getDefinition(answer.value));
+const EMPTY_DEFINITION: WordDefinition = {
+  pos: "",
+  ipa: "",
+  level: "",
+  en: "",
+  example: "",
+};
+
+/**
+ * La voce di dizionario della parola in corso.
+ *
+ * Era una computed, ed era la scelta giusta finché il dizionario stava in
+ * memoria: il testo si ricavava da `answer` all'istante. Ora arriva dalla rete,
+ * cioè NON è più ricavabile — è un dato che va atteso e conservato. Quindi
+ * torna a essere un ref, aggiornato da fetchDefinition().
+ *
+ * La regola generale: computed per ciò che si calcola, ref per ciò che arriva.
+ */
+const currentDefinition = ref<WordDefinition>(EMPTY_DEFINITION);
 
 /**
  * Quanto resta del tempo di lettura, in percentuale, per la barra che si
@@ -433,9 +453,40 @@ function submitGuess() {
   }
 }
 
+/**
+ * Chiede al server la voce di dizionario di `word` e la mette da parte.
+ *
+ * Viene lanciata all'INIZIO del livello, non quando serve mostrarla: così la
+ * mezza attesa della rete cade mentre il giocatore sta indovinando, e quando la
+ * finestra si apre il testo è già lì da un pezzo. L'attesa esiste ancora, ma in
+ * un momento in cui nessuno la guarda.
+ *
+ * Non si aspetta il risultato (nessun await da chi la chiama): il gioco deve
+ * partire subito, la definizione arriverà quando arriva.
+ */
+async function fetchDefinition(word: string) {
+  currentDefinition.value = EMPTY_DEFINITION;
+  try {
+    const definition = await $fetch<WordDefinition>("/api/definition", {
+      query: { word },
+    });
+    // La parola potrebbe essere già cambiata (partita nuova, livello saltato):
+    // in tal caso questa risposta è vecchia e va buttata, o mostreremmo la
+    // spiegazione di una parola che il giocatore non sta più giocando.
+    if (answer.value === word) {
+      currentDefinition.value = definition;
+    }
+  } catch (e) {
+    // Rete assente o server giù: si resta sulla voce vuota. Una spiegazione
+    // mancante è un difetto estetico, non deve fermare la partita.
+    console.error("Could not load definition:", e);
+  }
+}
+
 /** Carica una parola nuova e pulisce la griglia per il turno successivo. */
 function loadWord() {
   answer.value = pickRandomAnswer();
+  fetchDefinition(answer.value); // parte adesso, arriverà molto prima che serva
   guesses.value = [];
   evaluations.value = [];
   currentGuess.value = "";

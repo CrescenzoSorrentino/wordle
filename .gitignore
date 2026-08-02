@@ -25,3 +25,4 @@ logs
 
 # Dati intermedi della generazione delle definizioni (rigenerabili)
 scripts/.cache
+.vercel
