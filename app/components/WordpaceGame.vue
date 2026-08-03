@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * WordleGame — il gioco intero: la griglia, le due tastiere (fisica e a
+ * Wordpace — il gioco intero: la griglia, le due tastiere (fisica e a
  * schermo), il cruscotto livello/tempo/punteggio, il conto alla rovescia di
  * ogni livello e la classifica di fine partita. Qui stanno l'interfaccia e lo
  * stato reattivo; le regole pure (valutazione, validazione, formula del timer)
@@ -579,7 +579,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="wordle" aria-label="Wordle game">
+  <section class="wordle" aria-label="Wordpace game">
     <div class="wordle__hud">
       <div class="wordle__stat">
         <span class="wordle__stat-label">Level</span>

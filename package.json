@@ -1,6 +1,6 @@
 {
-  "name": "wordle-arcade",
-  "description": "An arcade-twist Wordle: classic letter game with infinite, time-pressured levels and a Redis leaderboard.",
+  "name": "wordpace",
+  "description": "An endless, time-pressured five-letter word game that teaches you vocabulary between levels.",
   "license": "MIT",
   "author": "Crescenzo Sorrentino",
   "type": "module",

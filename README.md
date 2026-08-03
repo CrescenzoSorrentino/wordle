@@ -1,10 +1,13 @@
-# Wordle Arcade
+# Wordpace
 
-An arcade twist on Wordle: the classic five-letter word game, turned into an
-**endless, time-pressured run** with a global leaderboard — and a dictionary
-entry after every word, so a run also teaches you vocabulary.
+A five-letter word game turned into an **endless, time-pressured run** with a
+global leaderboard — and a dictionary entry after every word, so a run also
+teaches you vocabulary.
 
-🎮 **Live demo:** https://wordle-rho-wheat.vercel.app
+Inspired by the classic five-letter guessing game. Not affiliated with, or
+endorsed by, The New York Times.
+
+🎮 **Play it:** https://wordpace.vercel.app
 
 ## How to play
 
@@ -45,7 +48,7 @@ levels are worth more.
   of each level, so the request has finished long before the entry is shown.
 
 ```
-app/components/WordleGame.vue   the game (state, board, keyboard, timer, UI)
+app/components/WordpaceGame.vue  the game (state, board, keyboard, timer, UI)
 shared/wordle.ts                pure rules: evaluate, validate, timer formula
 shared/words/                   the official guess + answer word lists
 shared/definitions.ts           dictionary lookup, with a never-throwing fallback

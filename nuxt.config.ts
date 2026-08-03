@@ -7,13 +7,13 @@ export default defineNuxtConfig({
   // e alle anteprime quando il link viene condiviso.
   app: {
     head: {
-      title: 'Wordle Arcade',
+      title: 'Wordpace',
       htmlAttrs: { lang: 'en' },
       meta: [
         {
           name: 'description',
           content:
-            'An arcade twist on Wordle: endless, time-pressured word levels with a global leaderboard.',
+            'An endless, time-pressured five-letter word game: beat the clock, climb the leaderboard, learn a word every level.',
         },
       ],
     },
