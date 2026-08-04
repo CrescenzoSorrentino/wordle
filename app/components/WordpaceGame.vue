@@ -1172,17 +1172,12 @@ onBeforeUnmount(() => {
 }
 
 /* Quanti aiuti sono già stati comprati su questa parola: dice al giocatore che
-   dentro c'è qualcosa da rileggere, senza che debba aprire per scoprirlo. */
+   dentro c'è qualcosa da rileggere, senza che debba aprire per scoprirlo.
+   Testo semplice come la scritta "Hint" (peso e colore ereditati dal bottone):
+   il numero è già l'unica cifra lì dentro, un pallino colorato lo caricava di
+   un'urgenza che non ha — l'informazione "c'è un aiuto comprabile" la dà già
+   la lampadina accesa. */
 .wordle__hint-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.1rem;
-  height: 1.1rem;
-  border-radius: 999px;
-  background: var(--wg-correct);
-  color: #ffffff;
-  font-size: 0.65rem;
   font-variant-numeric: lining-nums tabular-nums;
 }
 
