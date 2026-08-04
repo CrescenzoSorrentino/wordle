@@ -32,6 +32,55 @@ export const TIME_PENALTY = 5; // secondi
 export const EXPLANATION_TIME = 12; // secondi per leggere la spiegazione di una parola
 
 /**
+ * Le tre gradazioni di aiuto che il giocatore può comprare quando è in
+ * difficoltà, dalla più avara alla più generosa:
+ * - "small":  una lettera che è nella parola e che non ha ancora provato
+ * - "medium": la frase d'esempio con la parola cancellata
+ * - "large":  la definizione della parola
+ */
+export type HintSize = "small" | "medium" | "large";
+
+// Costo di ogni aiuto, in punti PER LIVELLO: il prezzo vero è questo numero
+// moltiplicato per il livello in corso. Un costo fisso sarebbe una mazzata al
+// livello 1 e regalato al livello 20, perché i punti guadagnati crescono col
+// livello (vedi wordScore nel componente).
+//
+// I valori sono tarati sul livello 3-4, dove finisce la maggior parte delle
+// partite: lì l'aiuto grande costa circa un quarto del punteggio accumulato —
+// si sente, ma non azzera la partita — e il piccolo poco abbastanza da restare
+// una scelta leggera. Più si sale, più diventano proporzionalmente economici,
+// perché il punteggio cresce a valanga e il costo cresce dritto: accettabile,
+// dato che ai livelli alti le parole sono anche più difficili.
+export const HINT_COST_SMALL = 3;
+export const HINT_COST_MEDIUM = 6;
+export const HINT_COST_LARGE = 12;
+
+// Quando compare l'opzione dell'aiuto. Bastano una delle due condizioni: sono
+// due segnali di difficoltà diversi, e chi è bloccato con tempo in abbondanza
+// merita aiuto quanto chi sta per scadere.
+//
+// Tre tentativi e non quattro perché ne restano ancora tre da giocare: un
+// aiuto che arriva quando non puoi più usarlo è peggio di nessun aiuto, visto
+// che paghi e perdi comunque.
+export const HINT_MIN_GUESSES = 3; // tentativi già fatti
+export const HINT_LOW_TIME = 45; // secondi rimasti
+
+/**
+ * Listino prezzi: da ogni taglia di aiuto al suo costo per livello. Costruito
+ * una volta sola, come VALID_WORD_SET — non cambia mai.
+ *
+ * Il tipo `Record<HintSize, number>` obbliga a elencare TUTTE e tre le taglie:
+ * se un domani ne aggiungessimo una quarta e ci dimenticassimo di darle un
+ * prezzo, il compilatore lo direbbe subito, invece di lasciare in giro un aiuto
+ * che costa `undefined`.
+ */
+const HINT_COSTS: Record<HintSize, number> = {
+  small: HINT_COST_SMALL,
+  medium: HINT_COST_MEDIUM,
+  large: HINT_COST_LARGE,
+};
+
+/**
  * L'esito di una singola lettera di un tentativo:
  * - "correct": lettera giusta al posto giusto (verde)
  * - "present": la lettera c'è, ma in un'altra posizione (giallo)
@@ -122,4 +171,62 @@ export function timeForLevel(level: number): number {
   return Math.floor(
     FLOOR_TIME + (START_TIME - FLOOR_TIME) * Math.pow(DECAY_RATE, level - 1),
   );
+}
+
+/**
+ * Quanti punti costa un aiuto al livello indicato.
+ *
+ * Il prezzo cresce col livello perché ci cresce anche il guadagno (vedi
+ * wordScore): un costo fisso sarebbe proibitivo all'inizio e irrilevante dopo
+ * il decimo livello, cioè proprio dove gli aiuti servono davvero.
+ */
+export function costForHint(size: HintSize, level: number): number {
+  return HINT_COSTS[size] * level;
+}
+
+/**
+ * Una lettera della soluzione che il giocatore non ha ancora provato, scelta a
+ * caso fra quelle disponibili. È il contenuto dell'aiuto piccolo.
+ *
+ * A caso e non la prima: scegliendo sempre la prima in ordine di parola, un
+ * giocatore attento capirebbe lo schema e ricaverebbe una seconda informazione
+ * ("tutte quelle prima le ho già escluse") che non gli abbiamo venduto.
+ *
+ * Restituisce `undefined` quando non c'è più nulla da rivelare, cioè quando le
+ * lettere della soluzione sono già state provate tutte. Chi la chiama deve
+ * spegnere il pulsante in quel caso: sarebbe pessimo farsi pagare per il nulla.
+ */
+export function pickUntriedLetter(
+  answer: string,
+  guesses: string[],
+): string | undefined {
+  const tried = new Set(guesses.join(""));
+
+  // Il Set attorno ad `answer` toglie i doppioni: in "abbey" la B compare due
+  // volte, e senza avrebbe il doppio delle probabilità di uscire.
+  const available = [...new Set(answer)].filter((letter) => !tried.has(letter));
+
+  if (available.length === 0) return undefined;
+
+  return available[Math.floor(Math.random() * available.length)];
+}
+
+/**
+ * La frase d'esempio con la parola segreta sostituita da uno spazio da
+ * riempire. È il contenuto dell'aiuto medio.
+ *
+ * I due indicatori dell'espressione regolare non sono un vezzo:
+ * - "i" ignora maiuscole e minuscole. Senza, una frase che INIZIA con la parola
+ *   ("Baste the turkey…") non verrebbe riconosciuta, e il giocatore si
+ *   ritroverebbe la soluzione in chiaro dopo averla pagata. Nel dizionario
+ *   attuale succederebbe in 52 voci su 2.315.
+ * - "g" sostituisce tutte le occorrenze e non solo la prima, nel caso la parola
+ *   compaia due volte nella stessa frase.
+ *
+ * La maschera prende la lunghezza dalla parola invece di essere scritta a mano:
+ * così resta corretta anche se un domani WORD_LENGTH cambiasse. Non rivela
+ * nulla, dato che le parole sono tutte della stessa lunghezza.
+ */
+export function maskWordInExample(example: string, word: string): string {
+  return example.replace(new RegExp(word, "gi"), "_".repeat(word.length));
 }

@@ -18,7 +18,13 @@ import {
   TIME_BONUS_PRESENT,
   TIME_PENALTY,
   EXPLANATION_TIME,
+  HINT_MIN_GUESSES,
+  HINT_LOW_TIME,
+  costForHint,
+  pickUntriedLetter,
+  maskWordInExample,
   type LetterState,
+  type HintSize,
 } from "#shared/wordle";
 import {
   LEADERBOARD_SIZE,
@@ -91,6 +97,28 @@ let explanationTimer: ReturnType<typeof setInterval> | undefined;
 // può essere sfruttato di nuovo reinviandolo. Si azzerano a ogni nuova parola.
 let rewardedGreens = new Set<number>(); // posizioni verdi già premiate
 let rewardedYellows = new Set<string>(); // lettere gialle già premiate
+/**
+ * Gli aiuti comprati su QUESTA parola, ognuno col testo che ha rivelato.
+ *
+ * Un solo stato e non due (un elenco di comprati + un elenco di testi) perché
+ * sarebbero due copie dello stesso fatto, da aggiornare e azzerare in coppia:
+ * il giorno che se ne aggiorna una sola, il pulsante risulta spento senza che
+ * compaia nulla, e il giocatore ha pagato per il vuoto.
+ *
+ * Reattivo, a differenza di rewardedGreens qui sopra, perché il pannello degli
+ * aiuti lo legge per sapere cosa mostrare e quali pulsanti spegnere.
+ */
+const boughtHints = ref<{ size: HintSize; text: string }[]>([]);
+
+/**
+ * Se la finestra degli aiuti è aperta.
+ *
+ * Il timer NON si ferma mentre è aperta, a differenza della spiegazione: lì il
+ * giocatore ha già finito la parola, qui la sta ancora giocando. Fermarlo
+ * regalerebbe tempo di riflessione gratis, e trasformerebbe la finestra in una
+ * pausa strategica invece che in una scelta sotto pressione.
+ */
+const hintPanelOpen = ref(false);
 
 // La voce scelta per la pronuncia. Non è reattiva: a schermo non ci va mai.
 let englishVoice: SpeechSynthesisVoice | undefined;
@@ -210,6 +238,62 @@ const explanationProgress = computed(
   () => `${(explanationTimeLeft.value / EXPLANATION_TIME) * 100}%`,
 );
 
+/**
+ * Se il pannello degli aiuti va mostrato. Due segnali di difficoltà diversi, e
+ * ne basta uno: chi è bloccato dopo tre tentativi ha bisogno di aiuto quanto
+ * chi sta per esaurire il tempo.
+ *
+ * Il controllo sulla fase non è pignoleria: senza, il pannello resterebbe
+ * visibile sopra il Game Over (dove il tempo è a zero, quindi la seconda
+ * condizione è vera) e accanto alla spiegazione dopo una parola risolta al
+ * quinto tentativo — lasciando comprare un aiuto per una parola che il
+ * giocatore non sta più giocando.
+ */
+/** Come si chiamano i tre aiuti a schermo. */
+const HINT_LABELS: Record<HintSize, string> = {
+  small: "Letter",
+  medium: "Sentence",
+  large: "Definition",
+};
+
+/**
+ * I tre aiuti già pronti da disegnare: etichetta, prezzo al livello corrente,
+ * se è già stato comprato e se il giocatore se lo può permettere.
+ *
+ * Come `board`, il template si limita a dipingere: qui c'è tutto ciò che serve
+ * per decidere quali pulsanti spegnere, così l'HTML non deve fare conti.
+ */
+const hintOptions = computed(() =>
+  (["small", "medium", "large"] as const).map((size) => {
+    const cost = costForHint(size, level.value);
+    return {
+      size,
+      cost,
+      label: HINT_LABELS[size],
+      bought: boughtHints.value.some((hint) => hint.size === size),
+      affordable: score.value >= cost,
+    };
+  }),
+);
+
+/**
+ * Se c'è almeno un aiuto che il giocatore può davvero comprare adesso: non
+ * ancora preso, e alla sua portata. Serve ad accendere la lampadina.
+ *
+ * Non basta "ho abbastanza punti": avendo già comprato tutti e tre gli aiuti,
+ * i punti non servono a nulla e la lampadina deve restare spenta.
+ */
+const canBuyAnyHint = computed(() =>
+  hintOptions.value.some((option) => !option.bought && option.affordable),
+);
+
+const hintAvailable = computed(
+  () =>
+    status.value === "playing" &&
+    (guesses.value.length >= HINT_MIN_GUESSES ||
+      timeLeft.value <= HINT_LOW_TIME),
+);
+
 // === Azioni: le funzioni che modificano lo stato ===
 
 /** Aggiunge una lettera alla riga attiva, se c'è spazio e la partita è in corso. */
@@ -223,6 +307,60 @@ function addLetter(letter: string) {
 function removeLetter() {
   if (status.value !== "playing") return;
   currentGuess.value = currentGuess.value.slice(0, -1);
+}
+
+/**
+ * Il testo di un aiuto, oppure `undefined` se non c'è nulla da dare.
+ *
+ * Lo `switch` su HintSize non è una scelta stilistica: essendo un tipo a tre
+ * valori, TypeScript sa che i casi sono esattamente tre e segnala se ne
+ * aggiungiamo un quarto senza gestirlo qui. Con un `string` non potrebbe.
+ */
+function buildHintText(size: HintSize): string | undefined {
+  const definition = currentDefinition.value;
+
+  switch (size) {
+    case "small": {
+      const letter = pickUntriedLetter(answer.value, guesses.value);
+      return letter
+        ? `The word contains the letter “${letter.toUpperCase()}”.`
+        : undefined;
+    }
+    case "medium":
+      // La definizione arriva dal server: se non è ancora arrivata (o la parola
+      // non ne ha una) i campi sono vuoti, e non c'è niente da vendere.
+      return definition.example
+        ? maskWordInExample(definition.example, answer.value)
+        : undefined;
+    case "large":
+      return definition.en || undefined;
+  }
+}
+
+/**
+ * Compra un aiuto: scala i punti e ne registra il testo.
+ *
+ * L'ordine dei controlli è la parte importante. Il testo viene costruito PRIMA
+ * di toccare il punteggio, così se non c'è nulla da rivelare — succede quando
+ * il giocatore ha già provato tutte le lettere della parola — la funzione esce
+ * senza far pagare. Scalando i punti per primi, avrebbe pagato per il vuoto.
+ *
+ * I tre controlli iniziali duplicano quello che l'interfaccia già impedisce
+ * (pulsanti spenti). È voluto: l'interfaccia è una comodità per chi gioca, non
+ * una garanzia — e queste sono le regole.
+ */
+function buyHint(size: HintSize) {
+  if (!hintAvailable.value) return;
+  if (boughtHints.value.some((hint) => hint.size === size)) return;
+
+  const cost = costForHint(size, level.value);
+  if (score.value < cost) return;
+
+  const text = buildHintText(size);
+  if (!text) return;
+
+  score.value -= cost;
+  boughtHints.value.push({ size, text });
 }
 
 /** Mostra un messaggio breve che si cancella da solo dopo un attimo. */
@@ -493,6 +631,8 @@ function loadWord() {
   status.value = "playing";
   rewardedGreens = new Set(); // parola nuova → nessun premio ancora dato
   rewardedYellows = new Set();
+  boughtHints.value = [];
+  hintPanelOpen.value = false;
   startTimer(); // nuovo tempo per questo livello, più corto del precedente
 }
 
@@ -540,6 +680,15 @@ function onPhysicalKey(event: KeyboardEvent) {
   // Ignora le scorciatoie (Cmd/Ctrl/Alt) per non rubare copia, ricarica…
   if (event.metaKey || event.ctrlKey || event.altKey) return;
 
+  // Con la finestra degli aiuti aperta la tastiera serve solo a chiuderla:
+  // altrimenti si continuerebbe a scrivere su una griglia che non si vede.
+  // Un controllo qui invece che in addLetter, removeLetter e submitGuess:
+  // un punto solo da ricordare.
+  if (hintPanelOpen.value) {
+    if (event.key === "Escape") hintPanelOpen.value = false;
+    return;
+  }
+
   if (event.key === "Enter") {
     handleKey("enter");
   } else if (event.key === "Backspace") {
@@ -553,8 +702,9 @@ function onPhysicalKey(event: KeyboardEvent) {
 // gioco (spiegazione o Game Over), e lo ripristina appena si torna a giocare.
 // La condizione nomina l'unica fase "libera" invece di elencare quelle bloccate:
 // così una quarta fase futura sarà gestita correttamente senza toccare nulla.
-watch(status, (current) => {
-  document.body.style.overflow = current !== "playing" ? "hidden" : "";
+watch([status, hintPanelOpen], ([current, hintsOpen]) => {
+  const covered = current !== "playing" || hintsOpen;
+  document.body.style.overflow = covered ? "hidden" : "";
 });
 
 // Quando il componente compare a schermo: avvia la prima partita e si mette in
@@ -600,10 +750,51 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Messaggio breve. aria-live fa sì che i lettori di schermo lo annuncino. -->
-    <p class="wordle__message" role="status" aria-live="polite">
-      {{ message }}
-    </p>
+    <!-- Riga di servizio: il messaggio al centro e, quando serve, il pulsante
+         degli aiuti a destra. Il pulsante sta QUI e non sotto la griglia perché
+         questa riga ha un'altezza fissa già riservata: comparendo non sposta
+         nulla, mentre un pannello sotto la griglia spingeva giù la tastiera
+         mentre il giocatore stava digitando. -->
+    <div class="wordle__status-row">
+      <!-- aria-live fa sì che i lettori di schermo annuncino il messaggio. -->
+      <p class="wordle__message" role="status" aria-live="polite">
+        {{ message }}
+      </p>
+
+      <button
+        v-if="hintAvailable"
+        class="wordle__hint-open"
+        :class="{ 'wordle__hint-open--lit': canBuyAnyHint }"
+        type="button"
+        :aria-label="
+          canBuyAnyHint ? 'Open hints — one is available' : 'Open hints'
+        "
+        @click="hintPanelOpen = true"
+      >
+        <!-- Icona disegnata qui e non un'emoji: un SVG eredita `currentColor`,
+             quindi si spegne insieme al pulsante ed è identico su ogni sistema.
+             Un'emoji la disegna il sistema operativo, sempre a colori pieni. -->
+        <svg
+          class="wordle__icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path
+            class="wordle__icon-bulb"
+            d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"
+          />
+          <path d="M9.5 20h5" />
+        </svg>
+        Hint<span v-if="boughtHints.length" class="wordle__hint-badge">{{
+          boughtHints.length
+        }}</span>
+      </button>
+    </div>
 
     <div class="wordle__board">
       <!-- Una riga per ogni elemento di `board` (6 righe). -->
@@ -617,6 +808,67 @@ onBeforeUnmount(() => {
         >
           {{ cell.letter.toUpperCase() }}
         </div>
+      </div>
+    </div>
+
+    <!-- Aiuti: una finestra e non un pannello dentro la pagina. Su uno schermo
+         da telefono il gioco occupa già tutta l'altezza disponibile, e un
+         blocco che cresce a ogni acquisto spingeva la tastiera fuori schermo.
+         Una finestra sopra il gioco non toglie spazio a nulla, e riusa un
+         linguaggio che il giocatore conosce già (spiegazione, fine partita). -->
+    <div v-if="hintPanelOpen" class="wordle__overlay">
+      <div
+        class="wordle__result"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Hints"
+      >
+        <p class="wordle__result-label">Need a hint?</p>
+        <p class="wordle__hints-intro">
+          Each one costs points. The clock keeps running.
+        </p>
+
+        <div class="wordle__hints-row">
+          <button
+            v-for="option in hintOptions"
+            :key="option.size"
+            class="wordle__hint"
+            type="button"
+            :disabled="option.bought || !option.affordable"
+            :title="
+              option.bought
+                ? 'Already bought'
+                : option.affordable
+                  ? `Costs ${option.cost} points`
+                  : 'Not enough points'
+            "
+            @click="buyHint(option.size)"
+          >
+            <span class="wordle__hint-label">{{ option.label }}</span>
+            <span class="wordle__hint-cost">−{{ option.cost }}</span>
+          </button>
+        </div>
+
+        <!-- Gli aiuti comprati restano per tutta la parola: sono stati pagati,
+             e riaprire la finestra per rileggerli non deve costare un secondo
+             acquisto. Ognuno porta il nome dell'aiuto da cui viene, altrimenti
+             comprandone due non si capisce quale testo risponde a cosa. -->
+        <div
+          v-for="hint in boughtHints"
+          :key="hint.size"
+          class="wordle__hint-box"
+        >
+          <p class="wordle__hint-kind">{{ HINT_LABELS[hint.size] }}</p>
+          <p class="wordle__hint-text">{{ hint.text }}</p>
+        </div>
+
+        <button
+          class="wordle__again"
+          type="button"
+          @click="hintPanelOpen = false"
+        >
+          Back to the game
+        </button>
       </div>
     </div>
 
@@ -659,7 +911,20 @@ onBeforeUnmount(() => {
             :aria-label="`Listen to the pronunciation of ${answer}`"
             @click="speakWord"
           >
-            🔊
+            <svg
+              class="wordle__icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M11 5 6 9H2v6h4l5 4V5z" />
+              <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+              <path d="M19 5a9 9 0 0 1 0 14" />
+            </svg>
           </button>
         </div>
 
@@ -838,13 +1103,87 @@ onBeforeUnmount(() => {
     sans-serif;
 }
 
+/* Riga di servizio: messaggio al centro, pulsante degli aiuti a destra.
+   Il pulsante è posizionato in assoluto e non in fila, così comparendo non
+   sposta il messaggio di un pixel — e la riga mantiene la stessa altezza con
+   o senza di lui. */
+.wordle__status-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 2rem;
+}
+
 .wordle__message {
-  /* Altezza fissa, così la griglia non sobbalza quando il messaggio compare
-     o sparisce. */
-  min-height: 1.5rem;
   margin: 0;
   font-size: 0.95rem;
   font-weight: 700;
+}
+
+/* Le icone disegnate nella pagina. `currentColor` fa sì che prendano il colore
+   del testo del pulsante che le contiene: si spengono quando lui si spegne,
+   si scuriscono quando lui si scurisce. Un'emoji resterebbe accesa. */
+.wordle__icon {
+  width: 1.05em;
+  height: 1.05em;
+  flex-shrink: 0; /* non si schiaccia se lo spazio è poco */
+}
+
+.wordle__hint-open {
+  position: absolute;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border: none;
+  border-radius: var(--wg-radius);
+  background: var(--wg-border);
+  color: var(--wg-text);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  animation: wordle-hints-in 0.2s ease;
+}
+
+.wordle__hint-open:hover {
+  filter: brightness(0.94);
+}
+
+/* Lampadina accesa = c'è almeno un aiuto comprabile adesso. È l'unica
+   informazione che il giocatore non potrebbe avere senza aprire la finestra,
+   quindi vale la pena darla qui.
+   Il giallo qui non confligge con quello della griglia: dentro una lampadina
+   si legge come "accesa", non come "lettera fuori posto". */
+.wordle__icon-bulb {
+  fill: none;
+  transition: fill 0.25s ease;
+}
+
+.wordle__hint-open--lit .wordle__icon-bulb {
+  fill: var(--wg-present);
+}
+
+.wordle__hint-open:active {
+  transform: translateY(1px);
+}
+
+/* Quanti aiuti sono già stati comprati su questa parola: dice al giocatore che
+   dentro c'è qualcosa da rileggere, senza che debba aprire per scoprirlo. */
+.wordle__hint-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: var(--wg-correct);
+  color: #ffffff;
+  font-size: 0.65rem;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 /* === Cruscotto (livello / tempo / punteggio) ===
@@ -967,6 +1306,108 @@ onBeforeUnmount(() => {
   background: var(--wg-absent);
   border-color: var(--wg-absent);
   color: #ffffff;
+}
+
+/* === Pannello degli aiuti ===
+   Sta fra la griglia e la tastiera e usa il linguaggio della tastiera (tasti
+   grigi, stessi angoli): è un'azione, non un contenuto, e deve leggersi come
+   tale. */
+@keyframes wordle-hints-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* Avverte che il tempo continua a scorrere: senza, il giocatore potrebbe
+   credere che la finestra metta in pausa, come fa quella della spiegazione. */
+.wordle__hints-intro {
+  margin: -0.4rem 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--wg-dim);
+}
+
+/* Tre colonne di uguale larghezza: su qualsiasi schermo i pulsanti restano
+   allineati su una riga sola, invece di andare a capo in modo irregolare. */
+.wordle__hints-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--wg-gap);
+  width: 100%;
+}
+
+.wordle__hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.5rem 0.3rem;
+  border: none;
+  border-radius: var(--wg-radius);
+  background: var(--wg-border);
+  color: var(--wg-text);
+  font: inherit;
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+
+.wordle__hint:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.wordle__hint:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Speso o non permesso: resta leggibile ma chiaramente inattivo. Il prezzo
+   continua a vedersi, perché è l'informazione che spiega il perché. */
+.wordle__hint:disabled {
+  background: var(--wg-surface);
+  color: var(--wg-dim);
+  cursor: not-allowed;
+}
+
+.wordle__hint-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.wordle__hint-cost {
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: lining-nums tabular-nums;
+  opacity: 0.7;
+}
+
+/* L'aiuto comprato. Nessun filetto colorato: nel gioco verde e giallo hanno un
+   significato preciso (lettera giusta, lettera fuori posto), e usarli qui come
+   decorazione presterebbe a un testo un significato che non ha. Un fondino
+   neutro e un'etichetta dicono di più senza rubare nulla alla tavolozza. */
+.wordle__hint-box {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--wg-radius);
+  background: var(--wg-surface);
+  text-align: left;
+}
+
+/* Da quale dei tre aiuti viene questo testo: comprandone due, senza questa
+   riga non si capirebbe più quale risponde a cosa. */
+.wordle__hint-kind {
+  margin: 0 0 0.15rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--wg-dim);
+}
+
+.wordle__hint-text {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.4;
 }
 
 /* === Finestre modali: spiegazione e fine partita === */
