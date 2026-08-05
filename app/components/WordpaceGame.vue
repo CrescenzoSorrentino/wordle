@@ -23,6 +23,8 @@ import {
   costForHint,
   pickUntriedLetter,
   maskWordInExample,
+  MAX_SKIPS,
+  costForSkip,
   type LetterState,
   type HintSize,
 } from "#shared/wordle";
@@ -48,7 +50,11 @@ type GameStatus = "playing" | "explaining" | "lost";
 // Dove si va quando la spiegazione finisce. Volutamente NON ripete la parola
 // "explaining": quella informazione la dà già GameStatus, e un dato scritto in
 // due posti prima o poi diverge.
-type NextStep = "next-level" | "game-over";
+//
+// "same-level" è la destinazione dello skip, e le altre due non andavano bene
+// proprio per quello che NON deve succedere: parola nuova sì, ma senza salire
+// di livello e senza i secondi che un livello nuovo regala.
+type NextStep = "next-level" | "same-level" | "game-over";
 
 // Voci preferite per la pronuncia, in ordine: si prende la prima disponibile.
 // L'ordine NON è un dettaglio estetico. Le voci marcate "en-US" includono anche
@@ -109,6 +115,18 @@ let rewardedYellows = new Set<string>(); // lettere gialle già premiate
  * aiuti lo legge per sapere cosa mostrare e quali pulsanti spegnere.
  */
 const boughtHints = ref<{ size: HintSize; text: string }[]>([]);
+
+/**
+ * Quante parole sono già state abbandonate in QUESTA partita.
+ *
+ * Si contano quelli usati e non quelli rimasti perché è il numero che serve a
+ * fare il prezzo: costForSkip rincara in base a quanti se ne sono già spesi.
+ * Quanti ne restano è una sottrazione, e infatti è una computed.
+ *
+ * Lo azzera solo newRun: gli skip durano una partita intera, non una parola.
+ * Rimetterlo a zero in loadWord ne regalerebbe tre a ogni livello.
+ */
+const skipsUsed = ref(0);
 
 /**
  * Se la finestra degli aiuti è aperta.
@@ -294,6 +312,30 @@ const hintAvailable = computed(
       timeLeft.value <= HINT_LOW_TIME),
 );
 
+/** Quanti skip restano da spendere: va a schermo sotto il pulsante. */
+const skipsLeft = computed(() => MAX_SKIPS - skipsUsed.value);
+
+/**
+ * Quanto costa lo skip in questo momento. Dipende dal livello e da quanti se
+ * ne sono già usati, quindi cambia due volte: salendo di livello e appena se
+ * ne compra uno. Da qui la regola d'ordine dentro skipWord.
+ */
+const skipCost = computed(() => costForSkip(level.value, skipsUsed.value));
+
+/**
+ * Se il giocatore può abbandonare la parola adesso. Tre condizioni, e servono
+ * tutte: la finestra è sbloccata, gliene resta almeno uno, e ha i punti per
+ * pagarlo.
+ *
+ * La prima riusa hintAvailable invece di riscriverne la condizione: skip e
+ * aiuti passano dalla stessa porta, ed è voluto — potendo skippare al primo
+ * tentativo, il gioco diventerebbe una caccia alla parola che piace.
+ */
+const canSkip = computed(
+  () =>
+    hintAvailable.value && skipsLeft.value > 0 && score.value >= skipCost.value,
+);
+
 // === Azioni: le funzioni che modificano lo stato ===
 
 /** Aggiunge una lettera alla riga attiva, se c'è spazio e la partita è in corso. */
@@ -363,6 +405,30 @@ function buyHint(size: HintSize) {
   boughtHints.value.push({ size, text });
 }
 
+/**
+ * Abbandona la parola in corso: la paga in punti e passa alla successiva
+ * restando sullo stesso livello.
+ *
+ * L'ordine delle due righe centrali è una regola, non un gusto: skipCost è
+ * calcolato SU skipsUsed, quindi incrementando prima di pagare il prezzo
+ * raddoppierebbe fra una riga e l'altra e il giocatore si vedrebbe addebitare
+ * lo skip successivo invece di questo.
+ *
+ * Non ferma il timer e non cambia livello: al resto pensa startExplanation,
+ * che spegne l'orologio e mostra la parola perduta. Il ritorno è affidato a
+ * "same-level", l'unica destinazione che ricarica la parola senza far salire
+ * di livello né regalare i secondi di uno nuovo.
+ *
+ * La guardia iniziale ripete quello che l'interfaccia già impedisce, come in
+ * buyHint: i pulsanti spenti sono una cortesia, la regola sta qui.
+ */
+function skipWord() {
+  if (!canSkip.value) return;
+  score.value -= skipCost.value;
+  skipsUsed.value++;
+  startExplanation("same-level");
+}
+
 /** Mostra un messaggio breve che si cancella da solo dopo un attimo. */
 function flashMessage(text: string) {
   message.value = text;
@@ -421,6 +487,8 @@ function finishExplanation() {
   stopExplanationTimer();
   if (nextStep.value === "next-level") {
     nextLevel();
+  } else if (nextStep.value === "same-level") {
+    loadWord();
   } else {
     endRun();
   }
@@ -518,17 +586,16 @@ async function submitScore() {
 }
 
 /**
- * Somma il tempo previsto per questo livello a quello ancora rimasto (il tempo
- * si porta avanti, così chi risolve in fretta mette da parte secondi), con un
- * tetto a MAX_TIME, poi fa scattare il conto alla rovescia una volta al
- * secondo. Quando arriva a zero la partita finisce.
+ * Fa scorrere l'orologio: un secondo in meno al secondo, e alla fine del tempo
+ * la partita si chiude passando dalla spiegazione della parola.
+ *
+ * NON assegna tempo: quello lo fa grantLevelTime, ed è una funzione separata
+ * apposta. Finché le due cose stavano insieme era impossibile rimettere in moto
+ * l'orologio senza regalare anche i secondi di un livello — cioè esattamente
+ * ciò che serve dopo uno skip, dove la parola cambia ma il livello no.
  */
-function startTimer() {
+function startCountdown() {
   stopTimer(); // mai due conti alla rovescia in funzione insieme
-  timeLeft.value = Math.min(
-    timeLeft.value + timeForLevel(level.value),
-    MAX_TIME,
-  );
   countdownTimer = setInterval(() => {
     timeLeft.value--;
     if (timeLeft.value <= 0) {
@@ -633,7 +700,30 @@ function loadWord() {
   rewardedYellows = new Set();
   boughtHints.value = [];
   hintPanelOpen.value = false;
-  startTimer(); // nuovo tempo per questo livello, più corto del precedente
+  startCountdown(); // l'orologio riparte, ma col tempo che c'era già
+}
+
+/**
+ * Accredita i secondi che spettano a questo livello.
+ *
+ * Si SOMMA a quelli rimasti invece di sostituirli, ed è la regola che rende
+ * Wordpace una corsa unica e non sei partite separate: i secondi risparmiati
+ * restano tuoi e ti terranno in vita più avanti, quando un livello ne regala
+ * quaranta. Con un `=` al posto del `+` ogni livello ripartirebbe da capo e
+ * andare veloci non varrebbe nulla.
+ *
+ * Math.min mette il tetto: chi vola nei primi livelli, che sono facili e
+ * generosi, si ritroverebbe altrimenti con un vantaggio tale da non guardare
+ * più l'orologio per il resto della partita.
+ *
+ * La chiamano newRun e nextLevel, cioè i due soli punti in cui un livello
+ * comincia davvero. Lo skip no: cambia la parola, non il livello.
+ */
+function grantLevelTime() {
+  timeLeft.value = Math.min(
+    timeLeft.value + timeForLevel(level.value),
+    MAX_TIME,
+  );
 }
 
 /** Avvia una partita nuova dal livello 1 con punteggio azzerato. */
@@ -644,6 +734,8 @@ function newRun() {
   qualifies.value = false;
   scoreSubmitted.value = false;
   nick.value = "";
+  skipsUsed.value = 0;
+  grantLevelTime();
   loadWord();
 }
 
@@ -651,6 +743,7 @@ function newRun() {
 function nextLevel() {
   level.value++;
   flashMessage(`Level ${level.value}!`);
+  grantLevelTime();
   loadWord();
 }
 
@@ -790,9 +883,7 @@ onBeforeUnmount(() => {
           />
           <path d="M9.5 20h5" />
         </svg>
-        Hint<span v-if="boughtHints.length" class="wordle__hint-badge">{{
-          boughtHints.length
-        }}</span>
+        Hint
       </button>
     </div>
 
@@ -860,6 +951,39 @@ onBeforeUnmount(() => {
         >
           <p class="wordle__hint-kind">{{ HINT_LABELS[hint.size] }}</p>
           <p class="wordle__hint-text">{{ hint.text }}</p>
+        </div>
+
+        <!-- Lo skip sta qui perché la domanda è la stessa degli aiuti ("sono
+             bloccato, cosa posso fare?") e la moneta pure. Ma è staccato dai
+             tre e in fondo, non in fila con loro: è l'unica scelta di questa
+             finestra che non si può disfare, e un dito che sbaglia pulsante
+             deve poter sbagliare solo fra tre acquisti innocui. -->
+        <div class="wordle__skip">
+          <button
+            class="wordle__skip-button"
+            type="button"
+            :disabled="!canSkip"
+            :title="
+              skipsLeft === 0
+                ? 'No skips left in this run'
+                : canSkip
+                  ? `Costs ${skipCost} points — the word is lost`
+                  : 'Not enough points'
+            "
+            @click="skipWord"
+          >
+            <span class="wordle__skip-label">Skip this word</span>
+            <span class="wordle__skip-cost">−{{ skipCost }}</span>
+          </button>
+
+          <!-- Il prezzo da solo non basta a decidere: senza sapere quanti ne
+               restano, il giocatore non può capire se conviene spenderlo ora o
+               tenerlo per un livello più avanti, quando le parole sono più
+               dure. E il rincaro del prossimo si legge già qui. -->
+          <p class="wordle__skip-note">
+            {{ skipsLeft === 1 ? "1 skip left" : `${skipsLeft} skips left` }} in
+            this run · no points for a skipped word
+          </p>
         </div>
 
         <button
@@ -1171,16 +1295,6 @@ onBeforeUnmount(() => {
   transform: translateY(1px);
 }
 
-/* Quanti aiuti sono già stati comprati su questa parola: dice al giocatore che
-   dentro c'è qualcosa da rileggere, senza che debba aprire per scoprirlo.
-   Testo semplice come la scritta "Hint" (peso e colore ereditati dal bottone):
-   il numero è già l'unica cifra lì dentro, un pallino colorato lo caricava di
-   un'urgenza che non ha — l'informazione "c'è un aiuto comprabile" la dà già
-   la lampadina accesa. */
-.wordle__hint-badge {
-  font-variant-numeric: lining-nums tabular-nums;
-}
-
 /* === Cruscotto (livello / tempo / punteggio) ===
    Una fascia sola divisa in tre, con i numeri grandi e le etichette piccole.
    Fondino chiarissimo invece di tre riquadri bordati: pesa meno della griglia,
@@ -1403,6 +1517,87 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 0.92rem;
   line-height: 1.4;
+}
+
+/* Il filetto in cima è la separazione vera fra "compro un aiuto" e "abbandono
+   la parola": sono due categorie di scelta diverse, e senza una riga che le
+   divida lo skip sembrerebbe il quarto acquisto della fila. */
+.wordle__skip {
+  width: 100%;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--wg-border);
+}
+
+/* Largo tutta la finestra, al contrario dei tre aiuti che stanno in colonne
+   strette: la larghezza diversa dice da sola che non è uno di loro.
+
+   Solo contorno e nessun fondo, mentre gli aiuti sono pieni: è la coppia
+   "azione principale / azione secondaria" che si vede ovunque, e qui dice la
+   cosa giusta — la via normale quando sei bloccato è comprare un aiuto e
+   risolvere, abbandonare la parola è il ripiego.
+
+   Il fondo trasparente non è un dettaglio: con un fondino chiaro lo skip
+   diventava indistinguibile dagli aiuti SPENTI, che passano anche loro a
+   --wg-surface. Ed è lo stato in cui li trova chiunque inizi una partita, a
+   punti zero. */
+.wordle__skip-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--wg-border-filled);
+  border-radius: var(--wg-radius);
+  background: transparent;
+  color: var(--wg-text);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+/* Il fondo compare solo al passaggio del mouse. Con lo sfondo trasparente non
+   c'è niente da scurire con un filtro, come si fa per gli aiuti: qui la
+   reazione al mouse deve essere il fondo stesso. */
+.wordle__skip-button:hover:not(:disabled) {
+  background: var(--wg-surface);
+  border-color: var(--wg-text);
+}
+
+.wordle__skip-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Come per gli aiuti: spento ma leggibile, e il prezzo resta in vista perché
+   di solito è proprio lui la spiegazione del perché è spento. Anche il
+   contorno si schiarisce: un pulsante inattivo non può avere il bordo più
+   marcato di quelli attivi lì accanto. */
+.wordle__skip-button:disabled {
+  border-color: var(--wg-border);
+  color: var(--wg-dim);
+  cursor: not-allowed;
+}
+
+.wordle__skip-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.wordle__skip-cost {
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: lining-nums tabular-nums;
+  opacity: 0.7;
+}
+
+.wordle__skip-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--wg-dim);
+  text-align: center;
 }
 
 /* === Finestre modali: spiegazione e fine partita === */

@@ -66,6 +66,34 @@ export const HINT_MIN_GUESSES = 3; // tentativi già fatti
 export const HINT_LOW_TIME = 45; // secondi rimasti
 
 /**
+ * Quante parole si possono abbandonare in un'intera partita. Tre e non
+ * illimitati: uno skip che si può sempre comprare non è una scelta, è solo un
+ * costo in punti da pagare ogni volta che la parola non piace.
+ */
+export const MAX_SKIPS = 3;
+
+/**
+ * Costo del PRIMO skip, in punti per livello, come per gli aiuti.
+ *
+ * Vale poco meno dell'aiuto grande (12) di proposito: la definizione di solito
+ * fa risolvere la parola, e quindi restituisce i punti che quella parola vale.
+ * Lo skip invece non restituisce niente. Se costasse molto meno diventerebbe la
+ * scorciatoia pigra da comprare al posto di pensare.
+ */
+export const SKIP_COST = 10;
+
+/**
+ * Di quanto raddoppia il prezzo a ogni skip già speso in questa partita.
+ *
+ * Il livello da solo non basterebbe a farli "costare sempre di più": anche il
+ * punteggio guadagnato cresce col livello, quindi tre skip a prezzo pieno
+ * peserebbero uguale in proporzione, e i primi due si spenderebbero a caso. Con
+ * questo fattore il conto si racconta in una riga: il primo skip costa mezza
+ * parola risolta, il secondo una parola, il terzo due.
+ */
+export const SKIP_COST_GROWTH = 2;
+
+/**
  * Listino prezzi: da ogni taglia di aiuto al suo costo per livello. Costruito
  * una volta sola, come VALID_WORD_SET — non cambia mai.
  *
@@ -182,6 +210,24 @@ export function timeForLevel(level: number): number {
  */
 export function costForHint(size: HintSize, level: number): number {
   return HINT_COSTS[size] * level;
+}
+
+/**
+ * Quanti punti costa abbandonare la parola in corso, dato il livello e quanti
+ * skip sono GIÀ stati usati in questa partita (0 per il primo).
+ *
+ * Cresce su due assi — col livello, come gli aiuti, e col numero di skip già
+ * spesi — perché sono due rincari diversi: il primo tiene il prezzo al passo
+ * col punteggio, il secondo rende ogni skip successivo una decisione più dura
+ * della precedente. Al livello 3, dove una parola risolta vale una sessantina
+ * di punti: 30, poi 60, poi 120.
+ *
+ * Nota che lo skip NON è mai gratis nemmeno quando lo si può pagare: la parola
+ * abbandonata non frutta punti, quindi si paga due volte. È voluto, ed è il
+ * motivo per cui il prezzo in punti può restare abbordabile.
+ */
+export function costForSkip(level: number, used: number): number {
+  return SKIP_COST * level * Math.pow(SKIP_COST_GROWTH, used);
 }
 
 /**

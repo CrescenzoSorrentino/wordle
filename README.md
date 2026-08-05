@@ -28,6 +28,32 @@ endorsed by, The New York Times.
 - The run ends when you run out of guesses **or** run out of time. If your score
   makes the top 10, you're prompted for a nickname and added to the leaderboard.
 
+## When you're stuck
+
+Once you've made **3 guesses** — or the clock drops under **45 seconds** — a
+**Hint** button appears. Everything behind it is paid for in points, and the
+clock keeps running while the panel is open: being stuck is meant to cost
+something.
+
+**Hints** reveal a bit of the word and stay readable for the rest of it. Prices
+are per level (`cost × level`), because the points a word is worth grow with the
+level too:
+
+| Hint | Reveals | Price |
+| --- | --- | --- |
+| Letter | One letter of the word you haven't tried yet | 3 × level |
+| Sentence | The example sentence, with the word blanked out | 6 × level |
+| Definition | What the word means | 12 × level |
+
+**Skips** give up on the word entirely — you get a new one, and you never find
+out what it was worth. You get **3 per run**, and each one costs more than the
+last: `10 × level × 2^(skips already used)`. At level 3, where a solved word is
+worth around 60 points, that's 30, then 60, then 120.
+
+A skip deliberately gives you *nothing* back: the level stays the same, no fresh
+seconds are granted, and the abandoned word scores zero. It buys you a word you
+might actually know — not more time.
+
 ## Scoring
 
 Per solved word: `(10 + unusedAttempts * 5) * level` — faster solves and higher
