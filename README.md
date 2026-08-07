@@ -26,7 +26,9 @@ endorsed by, The New York Times.
   definition and an example sentence. The clock and the keyboard are frozen
   while you read; a **Continue** button skips the remaining seconds.
 - The run ends when you run out of guesses **or** run out of time. If your score
-  makes the top 10, you're prompted for a nickname and added to the leaderboard.
+  makes the top 10 **of the current month**, you're prompted for a nickname and
+  added to the leaderboard. The board starts fresh on the first of every month,
+  so a good run is never locked out by scores set long ago.
 
 ## When you're stuck
 
@@ -62,7 +64,9 @@ levels are worth more.
 ## Tech
 
 - **Nuxt 4** / **Vue 3** (`<script setup>`), vanilla scoped CSS (BEM).
-- **Upstash Redis** for the leaderboard, stored as a sorted set (`ZADD` / `ZRANGE`).
+- **Upstash Redis** for the leaderboard, stored as a sorted set (`ZADD` / `ZRANGE`)
+  under a per-month key (`wordle:leaderboard:2026-08`), so the board resets on
+  its own and old months expire instead of piling up.
 - Pure game rules live in `shared/` (imported via the `#shared` alias) and are
   reused on the client and re-validated on the server.
 - Pronunciation uses the browser's built-in `speechSynthesis` — no audio files
@@ -80,9 +84,10 @@ shared/words/                   the official guess + answer word lists
 shared/definitions.ts           dictionary lookup, with a never-throwing fallback
 shared/words/definitions.ts     2,315 generated entries (do not edit by hand)
 shared/leaderboard.ts           leaderboard rules shared by client and server
+server/utils/leaderboard.ts     the Redis key of the current month's board
 server/api/definition.get.ts    one dictionary entry, by word
 server/api/leaderboard.get.ts   read the top 10
-server/api/leaderboard.post.ts  save a score
+server/api/leaderboard.post.ts  save a score (validated + rate limited)
 scripts/                        dictionary generation + validation (see below)
 ```
 
@@ -147,8 +152,11 @@ redeploy so they take effect.
 ## Notes
 
 - No accounts: the leaderboard keeps only the top 10 and trims the rest.
-- The client-reported score is trusted (no anti-cheat), which is fine for a
-  casual arcade game.
+- The score is still reported by the client, so it can be faked — the server
+  only limits the damage: it rejects anything above a plausible ceiling, allows
+  5 submissions per hour per address, and wipes the board monthly. A forged
+  score is therefore beatable and temporary rather than permanent. Verifying it
+  properly would mean replaying the run server-side, which is overkill here.
 - Everything the player reads is in English, so the game isn't limited to one
   audience. Code comments are in Italian — different readers, different language.
 - The dictionary was written by Claude and reviewed by sampling, not entry by

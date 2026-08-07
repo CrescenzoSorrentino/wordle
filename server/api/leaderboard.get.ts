@@ -1,10 +1,6 @@
 import { Redis } from "@upstash/redis";
 import { LEADERBOARD_SIZE, type LeaderboardEntry } from "#shared/leaderboard";
 
-// La chiave Redis sotto cui vive l'insieme ordinato. Ogni membro è salvato come
-// "nick|id", così due giocatori con lo stesso nome restano righe distinte.
-const LEADERBOARD_KEY = "wordle:leaderboard";
-
 /**
  * GET /api/leaderboard
  *
@@ -24,7 +20,7 @@ export default defineEventHandler(async (event): Promise<LeaderboardEntry[]> => 
 
     // Redis risponde con un array piatto: [membro, punteggio, membro, ...].
     const raw = await redis.zrange<(string | number)[]>(
-      LEADERBOARD_KEY,
+      currentLeaderboardKey(),
       0,
       LEADERBOARD_SIZE - 1,
       { rev: true, withScores: true },

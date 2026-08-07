@@ -95,6 +95,15 @@ const qualifies = ref(false); // questa partita è entrata nei primi 10?
 const nick = ref(""); // il nome che si sta scrivendo nel modulo
 const scoreSubmitted = ref(false); // punteggio di questa partita già salvato?
 
+/**
+ * Perché l'ultimo salvataggio è fallito, o stringa vuota se non è fallito.
+ *
+ * Prima di questo il fallimento finiva solo nella console: il modulo restava
+ * immobile e chi giocava non sapeva se il punteggio fosse stato salvato. Il
+ * peggior esito possibile per un errore è che nessuno se ne accorga.
+ */
+const submitError = ref("");
+
 let messageTimer: ReturnType<typeof setTimeout> | undefined;
 let countdownTimer: ReturnType<typeof setInterval> | undefined;
 let explanationTimer: ReturnType<typeof setInterval> | undefined;
@@ -572,6 +581,7 @@ async function finishRun() {
 /** Salva il nome scritto col punteggio della partita, poi ricarica la classifica. */
 async function submitScore() {
   if (!isValidNickname(nick.value)) return;
+  submitError.value = ""; // un nuovo tentativo cancella l'esito del precedente
   try {
     await $fetch("/api/leaderboard", {
       method: "POST",
@@ -582,6 +592,17 @@ async function submitScore() {
     leaderboard.value = await $fetch<LeaderboardEntry[]>("/api/leaderboard");
   } catch (e) {
     console.error("Could not submit score:", e);
+
+    // Il 429 merita un testo suo: è l'unico rifiuto che non si risolve
+    // riprovando subito, e senza spiegarlo il giocatore ritenta all'infinito.
+    // Non nomina il limite né il fatto che si conta per indirizzo: a chi ha
+    // giocato onestamente non serve, e a chi sta provando a barare direbbe
+    // esattamente quanto può osare.
+    const status = (e as { statusCode?: number })?.statusCode;
+    submitError.value =
+      status === 429
+        ? "Too many scores sent from here. Try again later."
+        : "Could not save your score. Check your connection and try again.";
   }
 }
 
@@ -1120,7 +1141,7 @@ onBeforeUnmount(() => {
           @submit.prevent="submitScore"
         >
           <label class="wordle__nickname-label" for="nick">
-            Top {{ LEADERBOARD_SIZE }}! Enter your name:
+            Top {{ LEADERBOARD_SIZE }} this month! Enter your name:
           </label>
           <input
             id="nick"
@@ -1130,9 +1151,23 @@ onBeforeUnmount(() => {
             autocomplete="off"
           />
           <button class="wordle__again" type="submit">Save</button>
+
+          <!-- role="alert" non è decorativo: fa annunciare il messaggio dai
+               lettori di schermo appena compare. Chi non vede il modulo si
+               accorgerebbe altrimenti solo del fatto che non succede nulla. -->
+          <p v-if="submitError" class="wordle__nickname-error" role="alert">
+            {{ submitError }}
+          </p>
         </form>
 
-        <!-- La classifica vera e propria. -->
+        <!-- La classifica vera e propria. Il titolo dice "this month" perché
+             la lista riparte da zero ogni mese: senza, chi vede dieci punteggi
+             più alti del suo pensa di essere fuori per sempre, invece che fino
+             al primo del mese. È anche l'unico posto in cui il giocatore può
+             accorgersi che esiste una scadenza. -->
+        <p v-if="leaderboard.length" class="wordle__scores-title">
+          Best this month
+        </p>
         <ol v-if="leaderboard.length" class="wordle__scores">
           <li
             v-for="(entry, i) in leaderboard"
@@ -1895,7 +1930,31 @@ onBeforeUnmount(() => {
   border-color: var(--wg-correct);
 }
 
+/* Il rosso qui è lecito, a differenza che sulla griglia: --wg-urgent è già il
+   colore del tempo che sta per finire, cioè "qualcosa non va", e un messaggio
+   di errore dice la stessa cosa. Non ruba significato a verde e giallo, che
+   sono i colori delle lettere. */
+.wordle__nickname-error {
+  margin: -0.2rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--wg-urgent);
+  text-align: center;
+}
+
 /* === Elenco della classifica === */
+/* Stesso trattamento delle altre etichettine del gioco (la riga sopra gli aiuti
+   comprati): maiuscoletto spaziato e colore attenuato, così intitola la lista
+   senza competere coi punteggi. */
+.wordle__scores-title {
+  margin: -0.4rem 0 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--wg-dim);
+}
+
 .wordle__scores {
   list-style: none;
   margin: 0;
