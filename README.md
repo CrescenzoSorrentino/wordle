@@ -25,6 +25,9 @@ endorsed by, The New York Times.
   pronunciation with a button that speaks it aloud, a frequency label, a
   definition and an example sentence. The clock and the keyboard are frozen
   while you read; a **Continue** button skips the remaining seconds.
+- At the end of a run, every word you met comes back in one list with its
+  meaning — the ones you missed and the ones you skipped included. Twelve
+  seconds each is enough to read a definition, not to keep it.
 - The run ends when you run out of guesses **or** run out of time. If your score
   makes the top 10 **of the current month**, you're prompted for a nickname and
   added to the leaderboard. The board starts fresh on the first of every month,
